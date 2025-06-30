@@ -1,4 +1,4 @@
-// server.ts
+// server.ts (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 import express, { Request, Response } from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -23,19 +23,7 @@ const isValidSearchArgs = (args: any): args is { query: string; limit?: number }
   typeof args.query === 'string' &&
   (args.limit === undefined || typeof args.limit === 'number');
 
-function getServer(): Server {
-  const server = new Server(
-    {
-      name: 'web-search',
-      version: '0.1.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-
+function configureServer(server: Server): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
@@ -84,71 +72,79 @@ function getServer(): Server {
       ],
     };
   });
-
-  return server;
 }
 
 async function performSearch(query: string, limit: number): Promise<SearchResult[]> {
-  const response = await axios.get('https://www.google.com/search', {
-    params: { q: query },
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    },
-  });
+    // ... (эта функция остается без изменений)
+    const response = await axios.get('https://www.google.com/search', {
+        params: { q: query },
+        headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        },
+    });
 
-  const $ = cheerio.load(response.data);
-  const results: SearchResult[] = [];
+    const $ = cheerio.load(response.data);
+    const results: SearchResult[] = [];
 
-  $('div.g').each((i, element) => {
-    if (i >= limit) return false;
+    $('div.g').each((i, element) => {
+        if (i >= limit) return false;
 
-    const titleElement = $(element).find('h3');
-    const linkElement = $(element).find('a');
-    const snippetElement = $(element).find('.VwiC3b');
+        const titleElement = $(element).find('h3');
+        const linkElement = $(element).find('a');
+        const snippetElement = $(element).find('.VwiC3b');
 
-    const url = linkElement.attr('href');
-    if (titleElement.length && linkElement.length && url?.startsWith('http')) {
-      results.push({
-        title: titleElement.text(),
-        url: url,
-        description: snippetElement.text() || '',
-      });
-    }
-  });
+        const url = linkElement.attr('href');
+        if (titleElement.length && linkElement.length && url?.startsWith('http')) {
+        results.push({
+            title: titleElement.text(),
+            url: url,
+            description: snippetElement.text() || '',
+        });
+        }
+    });
 
-  return results;
+    return results;
 }
 
 // --- HTTP server setup ---
 const app = express();
 app.use(express.json());
 
+// 1. Создаем сервер и транспорт ОДИН РАЗ при запуске приложения
+const mcpServer = new Server({
+    name: 'web-search',
+    version: '0.1.0',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+const mcpTransport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: undefined,
+});
+
+// 2. Конфигурируем обработчики ОДИН РАЗ
+configureServer(mcpServer);
+
+// 3. Соединяем их ОДИН РАЗ
+mcpServer.connect(mcpTransport).catch(console.error);
+
+
+// 4. В обработчике просто передаем запрос транспорту
 app.post('/mcp', async (req: Request, res: Response) => {
   try {
-    const server = getServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-
-    res.on('close', () => {
-      console.log('Request closed');
-      transport.close();
-      server.close();
-    });
-
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    // Транспорт и сервер уже созданы и готовы к работе
+    await mcpTransport.handleRequest(req, res, req.body);
   } catch (error) {
     console.error('Error handling MCP request:', error);
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'Internal server error',
-        },
-        id: null,
+        error: { code: -32603, message: 'Internal server error' },
+        id: req.body?.id || null,
       });
     }
   }
