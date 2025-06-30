@@ -1,4 +1,3 @@
-// server.ts (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 import express, { Request, Response } from "express";
 import { z } from "zod";
 
@@ -23,9 +22,9 @@ const SearchResultSchema = z.object({
   url: z.string().url(),
   description: z.string(),
 });
-const SearchResultListSchema = z.object({
+const SearchResultListSchema = {
   results: z.array(SearchResultSchema),
-});
+};
 
 function configureServer(server: McpServer): void {
   // Add an addition tool
@@ -54,11 +53,21 @@ function configureServer(server: McpServer): void {
           .optional()
           .describe("Maximum number of results to return (default: 5)"),
       } as const,
-      // outputSchema: SearchResultListSchema as any,
-    } ,
-    async ({ query, limit }) => ({
-      content: [{ type: "text", text: JSON.stringify( await performSearch(query, limit || 5)) } ],
-    })
+      outputSchema: SearchResultListSchema,
+    },
+    async ({ query, limit }) => {
+      const results = await performSearch(query, limit || 5);
+      const structuredContent = { results };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(structuredContent, null, 2),
+          },
+        ],
+        structuredContent,
+      };
+    }
   );
 }
 
@@ -66,8 +75,7 @@ async function performSearch(
   query: string,
   limit: number
 ): Promise<SearchResult[]> {
-
-  console.debug({query,limit});
+  console.debug({ query, limit });
   // ... (эта функция остается без изменений)
   const response = await axios.get("https://www.google.com/search", {
     params: { q: query },
@@ -79,11 +87,11 @@ async function performSearch(
 
   const $ = cheerio.load(response.data);
   const results: SearchResult[] = [];
-      results.push({
-        title: 'titleElement',
-        url: 'url',
-        description: 'snippetElement.text()'
-      });
+  results.push({
+    title: "titleElement",
+    url: "http://localhost",
+    description: "snippetElement.text()",
+  });
 
   $("div.g").each((i, element) => {
     if (i >= limit) return false;
